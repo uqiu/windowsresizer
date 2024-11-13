@@ -35,6 +35,8 @@ namespace windowsresizer
         private const int WH_MOUSE_LL = 14;
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
         private readonly LowLevelMouseProc mouseHookProc;
+        private const int WHEEL_DELTA = 120; // 标准滚轮增量
+        private int accumulatedDelta = 0; // 累积的滚轮增量
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MSLLHOOKSTRUCT
@@ -116,24 +118,77 @@ namespace windowsresizer
                     IntPtr foregroundWindow = GetForegroundWindow();
                     if (foregroundWindow != IntPtr.Zero && !IsZoomed(foregroundWindow))
                     {
-                        RECT rect;
-                        GetWindowRect(foregroundWindow, out rect);
+                        accumulatedDelta += delta;
+                    
+                        if (Math.Abs(accumulatedDelta) >= WHEEL_DELTA)
+                        {
+                            RECT rect;
+                            GetWindowRect(foregroundWindow, out rect);
+                        
+                            double dpiScale = GetDpiScale(foregroundWindow);
+                            int actualIncrement = (int)((accumulatedDelta / WHEEL_DELTA) * 
+                                (ctrlPressed ? widthIncrement : heightIncrement) * dpiScale);
 
-                        if (ctrlPressed)
-                        {
-                            int newWidth = rect.Right - rect.Left + (delta > 0 ? widthIncrement : -widthIncrement);
-                            SetWindowPos(foregroundWindow, IntPtr.Zero, rect.Left, rect.Top, newWidth, rect.Bottom - rect.Top, SWP_NOZORDER | SWP_NOMOVE);
+                            // 计算当前窗口的中心点
+                            int centerX = rect.Left + (rect.Right - rect.Left) / 2;
+                            int centerY = rect.Top + (rect.Bottom - rect.Top) / 2;
+
+                            if (ctrlPressed)
+                            {
+                                int currentWidth = rect.Right - rect.Left;
+                                int newWidth = currentWidth + actualIncrement;
+                                if (newWidth >= 100)
+                                {
+                                    // 计算新的左边位置，保持中心点不变
+                                    int newLeft = centerX - newWidth / 2;
+                                    SetWindowPos(foregroundWindow, IntPtr.Zero, 
+                                        newLeft, rect.Top, 
+                                        newWidth, rect.Bottom - rect.Top, 
+                                        SWP_NOZORDER);
+                                }
+                            }
+                            else if (altPressed)
+                            {
+                                int currentHeight = rect.Bottom - rect.Top;
+                                int newHeight = currentHeight + actualIncrement;
+                                if (newHeight >= 100)
+                                {
+                                    // 计算新的顶部位置，保持中心点不变
+                                    int newTop = centerY - newHeight / 2;
+                                    SetWindowPos(foregroundWindow, IntPtr.Zero, 
+                                        rect.Left, newTop, 
+                                        rect.Right - rect.Left, newHeight, 
+                                        SWP_NOZORDER);
+                                }
+                            }
+                        
+                            accumulatedDelta = 0;
                         }
-                        else if (altPressed)
-                        {
-                            int newHeight = rect.Bottom - rect.Top + (delta > 0 ? heightIncrement : -heightIncrement);
-                            SetWindowPos(foregroundWindow, IntPtr.Zero, rect.Left, rect.Top, rect.Right - rect.Left, newHeight, SWP_NOZORDER | SWP_NOMOVE);
-                        }
-                        return (IntPtr)1; // 处理消息
+                        return (IntPtr)1;
                     }
                 }
             }
             return CallNextHookEx(mouseHookID, nCode, wParam, lParam);
+        }
+
+        // 获取窗口的DPI缩放因子
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDC(IntPtr hWnd);
+    
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+    
+        [DllImport("gdi32.dll")]
+        private static extern int GetDeviceCaps(IntPtr hdc, int nIndex);
+    
+        private const int LOGPIXELSX = 88;
+    
+        private double GetDpiScale(IntPtr hwnd)
+        {
+            IntPtr desktopDc = GetDC(hwnd);
+            int dpi = GetDeviceCaps(desktopDc, LOGPIXELSX);
+            ReleaseDC(hwnd, desktopDc);
+            return dpi / 96.0; // 96 是标准DPI
         }
 
         protected override void OnClosed(EventArgs e)
