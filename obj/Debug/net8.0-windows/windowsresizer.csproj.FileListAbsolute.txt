@@ -22,3 +22,5 @@ C:\code\windowsresizer\windowsresizer\obj\Debug\net8.0-windows\windowsresizer.pd
 C:\code\windowsresizer\windowsresizer\obj\Debug\net8.0-windows\windowsresizer.genruntimeconfig.cache
 C:\code\windowsresizer\windowsresizer\obj\Debug\net8.0-windows\ref\windowsresizer.dll
 C:\code\windowsresizer\windowsresizer\obj\Debug\net8.0-windows\windowsresizer.sourcelink.json
+C:\code\windowsresizer\windowsresizer\bin\Debug\net8.0-windows\System.Windows.Extensions.dll
+C:\code\windowsresizer\windowsresizer\bin\Debug\net8.0-windows\runtimes\win\lib\net8.0\System.Windows.Extensions.dll

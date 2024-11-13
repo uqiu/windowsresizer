@@ -14,6 +14,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Diagnostics;
+using System.Windows.Forms; // 添加此引用到文件顶部
 
 namespace windowsresizer
 {
@@ -37,6 +38,7 @@ namespace windowsresizer
         private readonly LowLevelMouseProc mouseHookProc;
         private const int WHEEL_DELTA = 120; // 标准滚轮增量
         private int accumulatedDelta = 0; // 累积的滚轮增量
+        private NotifyIcon trayIcon;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MSLLHOOKSTRUCT
@@ -58,6 +60,7 @@ namespace windowsresizer
         public MainWindow()
         {
             InitializeComponent();
+            InitializeTrayIcon();
             mouseHookProc = MouseHookCallback;
             try
             {
@@ -65,19 +68,37 @@ namespace windowsresizer
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"加载配置文件失败: {ex.Message}\n将使用默认配置。", "配置加载错误", MessageBoxButton.OK, MessageBoxImage.Warning);
+                System.Windows.MessageBox.Show($"加载配置文件失败: {ex.Message}\n将使用默认配置。", "配置加载错误", MessageBoxButton.OK, MessageBoxImage.Warning);
                 CreateDefaultConfig();
             }
 
             mouseHookID = SetHook(mouseHookProc);
             if (mouseHookID == IntPtr.Zero)
             {
-                MessageBox.Show("无法设置鼠标钩子", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
-                Application.Current.Shutdown();
+                System.Windows.MessageBox.Show("无法设置鼠标钩子", "错误", MessageBoxButton.OK, MessageBoxImage.Error);
+                System.Windows.Application.Current.Shutdown(); // 修改这里
             }
 
-            this.WindowState = WindowState.Minimized;
+            this.Hide(); // 隐藏窗口而不是最小化
             this.ShowInTaskbar = false;
+        }
+
+        private void InitializeTrayIcon()
+        {
+            trayIcon = new NotifyIcon()
+            {
+                Icon = System.Drawing.SystemIcons.Application, // 使用默认图标
+                Visible = true,
+                Text = "Windows Resizer"
+            };
+
+            // 添加右键菜单
+            var contextMenu = new System.Windows.Forms.ContextMenuStrip();
+            var exitItem = new System.Windows.Forms.ToolStripMenuItem("退出");
+            exitItem.Click += (s, e) => System.Windows.Application.Current.Shutdown(); // 修改这里
+            contextMenu.Items.Add(exitItem);
+            
+            trayIcon.ContextMenuStrip = contextMenu;
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
@@ -226,6 +247,7 @@ namespace windowsresizer
 
         protected override void OnClosed(EventArgs e)
         {
+            trayIcon.Dispose(); // 清理托盘图标
             if (mouseHookID != IntPtr.Zero)
             {
                 UnhookWindowsHookEx(mouseHookID);
