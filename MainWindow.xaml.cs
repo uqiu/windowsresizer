@@ -49,8 +49,13 @@ namespace windowsresizer
         private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
         private readonly LowLevelMouseProc mouseHookProc;
         private const int WHEEL_DELTA = 120; // 标准滚轮增量
-        private int accumulatedDelta = 0; // 累积的滚轮增量
         private NotifyIcon trayIcon;
+
+        // 添加系统音效控制相关导入
+        [DllImport("user32.dll")]
+        private static extern bool SystemParametersInfo(uint uiAction, uint uiParam, ref int pvParam, uint fWinIni);
+        private const uint SPI_SETMESSAGEDURATION = 0x2017;
+        private const uint SPIF_SENDCHANGE = 0x2;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct MSLLHOOKSTRUCT
@@ -93,6 +98,16 @@ namespace windowsresizer
 
             this.Hide(); // 隐藏窗口而不是最小化
             this.ShowInTaskbar = false;
+
+            // 改用更可靠的方式禁用系统提示音
+            try
+            {
+                using (var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"AppEvents\Schemes\Apps\.Default\.Default\.Current", true))
+                {
+                    if (key != null) key.SetValue("", "", Microsoft.Win32.RegistryValueKind.String);
+                }
+            }
+            catch { /* ignore */ }
         }
 
         private void InitializeTrayIcon()
@@ -148,88 +163,105 @@ namespace windowsresizer
             return workArea;
         }
 
+        // 添加延迟控制
+        private DateTime lastWheelTime = DateTime.MinValue;
+        private const int MIN_WHEEL_INTERVAL = 16; // 约60fps
+
+        // 添加窗口调整相关标志
+        private const uint SWP_FRAMECHANGED = 0x0020;
+        private const uint SWP_NOACTIVATE = 0x0010;
+        private const uint SWP_NOCOPYBITS = 0x0100;
+        
         private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             const int WM_MOUSEWHEEL = 0x020A;
             if (nCode >= 0 && wParam == (IntPtr)WM_MOUSEWHEEL)
             {
+                TimeSpan timeSinceLastWheel = DateTime.Now - lastWheelTime;
+                if (timeSinceLastWheel.TotalMilliseconds < MIN_WHEEL_INTERVAL)
+                {
+                    return (IntPtr)1;
+                }
+                
                 MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
                 int delta = (short)((hookStruct.mouseData >> 16) & 0xFFFF);
-                bool widthKeyPressed = (GetKeyState(widthResizeKey) & 0x8000) != 0;   // 使用配置的快捷键
-                bool heightKeyPressed = (GetKeyState(heightResizeKey) & 0x8000) != 0;  // 使用配置的快捷键
+                bool widthKeyPressed = (GetKeyState(widthResizeKey) & 0x8000) != 0;
+                bool heightKeyPressed = (GetKeyState(heightResizeKey) & 0x8000) != 0;
 
                 if (widthKeyPressed || heightKeyPressed)
                 {
                     IntPtr foregroundWindow = GetForegroundWindow();
                     if (foregroundWindow != IntPtr.Zero && !IsZoomed(foregroundWindow))
                     {
-                        accumulatedDelta += delta;
-                    
-                        if (Math.Abs(accumulatedDelta) >= WHEEL_DELTA)
-                        {
-                            RECT rect;
-                            GetWindowRect(foregroundWindow, out rect);
-                            RECT workArea = GetWorkArea();
+                        RECT rect;
+                        GetWindowRect(foregroundWindow, out rect);
+                        RECT workArea = GetWorkArea();
                         
-                            double dpiScale = GetDpiScale(foregroundWindow);
-                            int actualIncrement = (int)((accumulatedDelta / WHEEL_DELTA) * 
-                                (widthKeyPressed ? widthIncrement : heightIncrement) * dpiScale);
-
-                            // 计算当前窗口的中心点
-                            int centerX = rect.Left + (rect.Right - rect.Left) / 2;
-                            int centerY = rect.Top + (rect.Bottom - rect.Top) / 2;
-
-                            if (widthKeyPressed)  // 更新判断条件
+                        // 计算当前窗口的中心点
+                        int centerX = rect.Left + (rect.Right - rect.Left) / 2;
+                        int centerY = rect.Top + (rect.Bottom - rect.Top) / 2;
+                        
+                        int increment = (delta > 0 ? 1 : -1) * 
+                            (widthKeyPressed ? widthIncrement : heightIncrement);
+                        
+                        if (widthKeyPressed)
+                        {
+                            int currentWidth = rect.Right - rect.Left;
+                            int newWidth = currentWidth + increment;
+                            if (newWidth >= 100)
                             {
-                                int currentWidth = rect.Right - rect.Left;
-                                int newWidth = currentWidth + actualIncrement;
+                                // 计算新的左边位置，保持中心点不变
+                                int newLeft = centerX - newWidth / 2;
+                                
+                                // 检查并调整边界
+                                if (newLeft < workArea.Left)
+                                {
+                                    newLeft = workArea.Left;
+                                }
+                                if (newLeft + newWidth > workArea.Right)
+                                {
+                                    newWidth = workArea.Right - newLeft;
+                                }
+                                
                                 if (newWidth >= 100)
                                 {
-                                    // 计算新的左边位置，保持中心点不变
-                                    int newLeft = centerX - newWidth / 2;
-                                    
-                                    // 检查是否超出屏幕左右边界
-                                    if (newLeft < workArea.Left)
-                                        newLeft = workArea.Left;
-                                    if (newLeft + newWidth > workArea.Right)
-                                        newWidth = workArea.Right - newLeft;
-                                    
-                                    if (newWidth >= 100)
-                                    {
-                                        SetWindowPos(foregroundWindow, IntPtr.Zero, 
-                                            newLeft, rect.Top, 
-                                            newWidth, rect.Bottom - rect.Top, 
-                                            SWP_NOZORDER);
-                                    }
+                                    SetWindowPos(foregroundWindow, IntPtr.Zero,
+                                        newLeft, rect.Top,
+                                        newWidth, rect.Bottom - rect.Top,
+                                        SWP_NOZORDER | SWP_NOACTIVATE);
                                 }
                             }
-                            else if (heightKeyPressed)  // 更新判断条件
+                        }
+                        else
+                        {
+                            int currentHeight = rect.Bottom - rect.Top;
+                            int newHeight = currentHeight + increment;
+                            if (newHeight >= 100)
                             {
-                                int currentHeight = rect.Bottom - rect.Top;
-                                int newHeight = currentHeight + actualIncrement;
+                                // 计算新的顶部位置，保持中心点不变
+                                int newTop = centerY - newHeight / 2;
+                                
+                                // 检查并调整边界
+                                if (newTop < workArea.Top)
+                                {
+                                    newTop = workArea.Top;
+                                }
+                                if (newTop + newHeight > workArea.Bottom)
+                                {
+                                    newHeight = workArea.Bottom - newTop;
+                                }
+                                
                                 if (newHeight >= 100)
                                 {
-                                    // 计算新的顶部位置，保持中心点不变
-                                    int newTop = centerY - newHeight / 2;
-                                    
-                                    // 检查是否超出屏幕上下边界
-                                    if (newTop < workArea.Top)
-                                        newTop = workArea.Top;
-                                    if (newTop + newHeight > workArea.Bottom)
-                                        newHeight = workArea.Bottom - newTop;
-                                    
-                                    if (newHeight >= 100)
-                                    {
-                                        SetWindowPos(foregroundWindow, IntPtr.Zero, 
-                                            rect.Left, newTop, 
-                                            rect.Right - rect.Left, newHeight, 
-                                            SWP_NOZORDER);
-                                    }
+                                    SetWindowPos(foregroundWindow, IntPtr.Zero,
+                                        rect.Left, newTop,
+                                        rect.Right - rect.Left, newHeight,
+                                        SWP_NOZORDER | SWP_NOACTIVATE);
                                 }
                             }
-                        
-                            accumulatedDelta = 0;
                         }
+                        
+                        lastWheelTime = DateTime.Now;
                         return (IntPtr)1;
                     }
                 }

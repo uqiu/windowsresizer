@@ -1,6 +1,6 @@
 {
-  "widthIncrement": 30,
-  "heightIncrement": 30,
-  "widthResizeKey": 16,  // VK_SHIFT
-  "heightResizeKey": 18  // VK_MENU (Alt)
+  "widthIncrement": 200,
+  "heightIncrement": 200,
+  "widthResizeKey": 18,  // VK_SHIFT
+  "heightResizeKey": 16  // VK_MENU (Alt)
 }
