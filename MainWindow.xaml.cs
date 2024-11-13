@@ -18,10 +18,20 @@ using System.Windows.Forms; // 添加此引用到文件顶部
 
 namespace windowsresizer
 {
+    // 将常量定义移到这里，所有类都可以访问
+    public static class VirtualKeys
+    {
+        public const int VK_SHIFT = 0x10;   // 添加 SHIFT 键的虚拟键码
+        public const int VK_CONTROL = 0x11;
+        public const int VK_MENU = 0x12;
+    }
+
     public class Config
     {
         public int widthIncrement { get; set; } = 10;
         public int heightIncrement { get; set; } = 10;
+        public int widthResizeKey { get; set; } = VirtualKeys.VK_CONTROL;  // 使用定义的常量
+        public int heightResizeKey { get; set; } = VirtualKeys.VK_MENU;    // 使用定义的常量
     }
 
     /// <summary>
@@ -31,6 +41,8 @@ namespace windowsresizer
     {
         private int widthIncrement = 10;
         private int heightIncrement = 10;
+        private int widthResizeKey = VirtualKeys.VK_CONTROL;  // 更新引用
+        private int heightResizeKey = VirtualKeys.VK_MENU;    // 更新引用
         private const string CONFIG_FILE = "config.json";
         private IntPtr mouseHookID = IntPtr.Zero;
         private const int WH_MOUSE_LL = 14;
@@ -143,10 +155,10 @@ namespace windowsresizer
             {
                 MSLLHOOKSTRUCT hookStruct = (MSLLHOOKSTRUCT)Marshal.PtrToStructure(lParam, typeof(MSLLHOOKSTRUCT));
                 int delta = (short)((hookStruct.mouseData >> 16) & 0xFFFF);
-                bool ctrlPressed = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
-                bool altPressed = (GetKeyState(VK_MENU) & 0x8000) != 0;
+                bool widthKeyPressed = (GetKeyState(widthResizeKey) & 0x8000) != 0;   // 使用配置的快捷键
+                bool heightKeyPressed = (GetKeyState(heightResizeKey) & 0x8000) != 0;  // 使用配置的快捷键
 
-                if (ctrlPressed || altPressed)
+                if (widthKeyPressed || heightKeyPressed)
                 {
                     IntPtr foregroundWindow = GetForegroundWindow();
                     if (foregroundWindow != IntPtr.Zero && !IsZoomed(foregroundWindow))
@@ -161,13 +173,13 @@ namespace windowsresizer
                         
                             double dpiScale = GetDpiScale(foregroundWindow);
                             int actualIncrement = (int)((accumulatedDelta / WHEEL_DELTA) * 
-                                (ctrlPressed ? widthIncrement : heightIncrement) * dpiScale);
+                                (widthKeyPressed ? widthIncrement : heightIncrement) * dpiScale);
 
                             // 计算当前窗口的中心点
                             int centerX = rect.Left + (rect.Right - rect.Left) / 2;
                             int centerY = rect.Top + (rect.Bottom - rect.Top) / 2;
 
-                            if (ctrlPressed)
+                            if (widthKeyPressed)  // 更新判断条件
                             {
                                 int currentWidth = rect.Right - rect.Left;
                                 int newWidth = currentWidth + actualIncrement;
@@ -191,7 +203,7 @@ namespace windowsresizer
                                     }
                                 }
                             }
-                            else if (altPressed)
+                            else if (heightKeyPressed)  // 更新判断条件
                             {
                                 int currentHeight = rect.Bottom - rect.Top;
                                 int newHeight = currentHeight + actualIncrement;
@@ -268,6 +280,8 @@ namespace windowsresizer
             {
                 widthIncrement = config.widthIncrement;
                 heightIncrement = config.heightIncrement;
+                widthResizeKey = config.widthResizeKey;    // 加载快捷键配置
+                heightResizeKey = config.heightResizeKey;   // 加载快捷键配置
             }
         }
 
@@ -294,8 +308,9 @@ namespace windowsresizer
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 
-        private const int VK_CONTROL = 0x11;
-        private const int VK_MENU = 0x12;
+        // 删除或注释掉原来的常量定义
+        // private const int VK_CONTROL = 0x11;
+        // private const int VK_MENU = 0x12;
         private const uint SWP_NOZORDER = 0x0004;
         private const uint SWP_NOMOVE = 0x0002;
 
