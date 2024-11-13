@@ -103,6 +103,18 @@ namespace windowsresizer
             }
         }
 
+        [DllImport("user32.dll")]
+        static extern bool SystemParametersInfo(int uAction, int uParam, ref RECT lpRect, int fuWinIni);
+        
+        private const int SPI_GETWORKAREA = 0x0030;
+
+        private RECT GetWorkArea()
+        {
+            RECT workArea = new RECT();
+            SystemParametersInfo(SPI_GETWORKAREA, 0, ref workArea, 0);
+            return workArea;
+        }
+
         private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
             const int WM_MOUSEWHEEL = 0x020A;
@@ -124,6 +136,7 @@ namespace windowsresizer
                         {
                             RECT rect;
                             GetWindowRect(foregroundWindow, out rect);
+                            RECT workArea = GetWorkArea();
                         
                             double dpiScale = GetDpiScale(foregroundWindow);
                             int actualIncrement = (int)((accumulatedDelta / WHEEL_DELTA) * 
@@ -141,10 +154,20 @@ namespace windowsresizer
                                 {
                                     // 计算新的左边位置，保持中心点不变
                                     int newLeft = centerX - newWidth / 2;
-                                    SetWindowPos(foregroundWindow, IntPtr.Zero, 
-                                        newLeft, rect.Top, 
-                                        newWidth, rect.Bottom - rect.Top, 
-                                        SWP_NOZORDER);
+                                    
+                                    // 检查是否超出屏幕左右边界
+                                    if (newLeft < workArea.Left)
+                                        newLeft = workArea.Left;
+                                    if (newLeft + newWidth > workArea.Right)
+                                        newWidth = workArea.Right - newLeft;
+                                    
+                                    if (newWidth >= 100)
+                                    {
+                                        SetWindowPos(foregroundWindow, IntPtr.Zero, 
+                                            newLeft, rect.Top, 
+                                            newWidth, rect.Bottom - rect.Top, 
+                                            SWP_NOZORDER);
+                                    }
                                 }
                             }
                             else if (altPressed)
@@ -155,10 +178,20 @@ namespace windowsresizer
                                 {
                                     // 计算新的顶部位置，保持中心点不变
                                     int newTop = centerY - newHeight / 2;
-                                    SetWindowPos(foregroundWindow, IntPtr.Zero, 
-                                        rect.Left, newTop, 
-                                        rect.Right - rect.Left, newHeight, 
-                                        SWP_NOZORDER);
+                                    
+                                    // 检查是否超出屏幕上下边界
+                                    if (newTop < workArea.Top)
+                                        newTop = workArea.Top;
+                                    if (newTop + newHeight > workArea.Bottom)
+                                        newHeight = workArea.Bottom - newTop;
+                                    
+                                    if (newHeight >= 100)
+                                    {
+                                        SetWindowPos(foregroundWindow, IntPtr.Zero, 
+                                            rect.Left, newTop, 
+                                            rect.Right - rect.Left, newHeight, 
+                                            SWP_NOZORDER);
+                                    }
                                 }
                             }
                         
